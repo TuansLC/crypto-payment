@@ -1,0 +1,18 @@
+# Maven
+**/target/
+**/.mvn/
+**/mvnw
+**/mvnw.cmd
+
+# IntelliJ
+**/.idea/
+**/*.iml
+**/*.iws
+**/*.ipr
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Spring Boot
+**/application-local.yml
