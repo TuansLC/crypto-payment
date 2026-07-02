@@ -42,18 +42,27 @@ crypto-payment/                        ← Git monorepo (1 repo duy nhất)
 ├── notification-service/              ← Spring Boot, port 8084
 │   ├── src/
 │   └── pom.xml
+├── audit-service/                     ← Spring Boot, port 8085
+│   ├── src/
+│   └── pom.xml
 ├── infrastructure/
 │   ├── docker-compose.yml
 │   └── init-db/
-│       └── init.sql
+│       ├── 01-create-databases.sql
+│       ├── 02-user-db.sql
+│       ├── 03-wallet-db.sql
+│       ├── 04-payment-db.sql
+│       ├── 05-notification-db.sql
+│       └── 06-audit-db.sql
 ├── .gitignore
 └── README.md
 ```
 
 ### Nguyên tắc kiến trúc
 - **Database per Service**: mỗi service có database riêng, không query chéo
-- **4 project độc lập**: không dùng Maven multi-module, mỗi service deploy riêng biệt
+- **5 project độc lập**: không dùng Maven multi-module, mỗi service deploy riêng biệt
 - **Giao tiếp bất đồng bộ**: ưu tiên Kafka events thay vì REST call trực tiếp giữa các service
+- **Centralized event trace**: `audit-service` consume mọi topic → ghi `event_store` (DB riêng), trace toàn bộ hành trình giao dịch mà KHÔNG phá database-per-service
 
 ---
 
@@ -148,7 +157,7 @@ transactions (
   amount DECIMAL(20,8) NOT NULL,
   currency VARCHAR(10) DEFAULT 'USDT',
   status VARCHAR(20) DEFAULT 'INITIATED',  -- INITIATED, PROCESSING, COMPLETED, FAILED, REVERSED
-  saga_state VARCHAR(30),                  -- DEBIT_PENDING, DEBIT_COMPLETED, CREDIT_PENDING, COMPLETED, COMPENSATING, FAILED
+  saga_state VARCHAR(30),                  -- DEBIT_PENDING, CREDIT_PENDING, COMPLETED, COMPENSATING, REVERSED, FAILED, COMPENSATION_FAILED
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 )
@@ -208,17 +217,40 @@ transaction_history (
 
 ---
 
+### 3.5 audit-service (port 8085)
+**Trách nhiệm:** Trace log tập trung — consume **tất cả** event của mọi service và ghi vào một `event_store` duy nhất để trace toàn bộ hành trình 1 giao dịch xuyên suốt hệ thống.
+
+**Database:** `audit_db`
+
+**Dependencies:**
+- Spring for Apache Kafka, Spring Data JPA, PostgreSQL Driver, Lombok
+
+**Vì sao cần service riêng, không cho 4 service ghi chung 1 bảng?**
+- Cho 4 service cùng ghi 1 bảng chung sẽ phá **Database-per-Service** (shared-DB coupling, single point of contention, cross-service transaction).
+- Vì mọi giao tiếp đã đi qua Kafka, chỉ cần **1 service consume mọi topic** rồi ghi vào **DB của riêng nó** → có bảng tổng hợp mong muốn mà vẫn loosely coupled. audit-service chết không ảnh hưởng luồng nghiệp vụ.
+- Đây là mô hình **audit trail / Event Sourcing nghiệp vụ**; observability hạ tầng (ELK, OpenTelemetry/Jaeger) là lớp bổ trợ.
+
+**Kafka Events Consumed:** tất cả topic — `user.events`, `wallet.commands`, `wallet.events`, `payment.events`, `wallet.dlq` (group-id riêng `audit-service-group`, không giành message với consumer nghiệp vụ).
+
+**Kafka Events Published:** không.
+
+**Table:** `event_store` — trace theo `correlation_id` (xuyên suốt 1 giao dịch), `causation_id` (cây nhân quả), idempotent theo `event_id` (UNIQUE). Xem `06-audit-db.sql`.
+
+---
+
 ## 4. Kafka Topics
 
 | Topic | Publisher | Consumers |
 |---|---|---|
-| `user.events` | user-service | wallet-service, notification-service |
-| `wallet.commands` | payment-service | wallet-service |
-| `wallet.events` | wallet-service | payment-service |
-| `payment.events` | payment-service | notification-service |
-| `wallet.dlq` | payment-service | (vận hành / alerting) |
+| `user.events` | user-service | wallet-service, notification-service, audit-service |
+| `wallet.commands` | payment-service | wallet-service, audit-service |
+| `wallet.events` | wallet-service | payment-service, audit-service |
+| `payment.events` | payment-service | notification-service, audit-service |
+| `wallet.dlq` | payment-service | audit-service, (vận hành / alerting) |
 
 > `wallet.dlq` là Dead Letter Queue: khi Compensating Transaction (`DebitReverseCommand`) retry hết số lần vẫn thất bại, payment-service đẩy event vào đây kèm `saga_state=COMPENSATION_FAILED` để con người can thiệp. Xem UC3 mục 6 trong `use-cases.md`.
+
+> `audit-service` consume mọi topic bằng **group-id riêng** (`audit-service-group`) — Kafka giao bản sao event cho từng consumer group độc lập, nên audit không "cướp" message của consumer nghiệp vụ.
 
 ---
 

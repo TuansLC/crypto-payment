@@ -114,16 +114,15 @@ Trường hợp ví B chưa từng giữ currency đó (ví dụ B chưa bao gi�
 |---|---|
 | 1 — Tạo lệnh | User A tạo lệnh chuyển $500 USDT cho B. `payment-service` check `Idempotency-Key`, validate `sender_id != receiver_id`, tạo `transaction` với `status='INITIATED'`, `saga_state='DEBIT_PENDING'` |
 | 2 — Trừ tiền A | `payment-service` ghi `outbox_events` (`DebitCommand`) → publish → `wallet-service` check idempotency, check `balance >= amount`, trừ tiền với Optimistic Locking (`@Version`) → publish `DebitCompleted` |
-| 3 — Ghi nhận Debit xong | `payment-service` consume `DebitCompleted` → cập nhật `saga_state='DEBIT_COMPLETED'` (state trung gian — xem giải thích ở mục "Saga State Machine" bên dưới) |
-| 4 — Phát lệnh Credit | `payment-service` ghi `outbox_events` (`CreditCommand`) → cập nhật `saga_state='CREDIT_PENDING'` → publish → `wallet-service` check idempotency, tìm hoặc tự tạo ví B đúng currency, cộng tiền → publish `CreditCompleted` |
-| 5 — Hoàn tất | `payment-service` consume `CreditCompleted` → `status='COMPLETED'`, `saga_state='COMPLETED'`. Ghi 2 rows vào `transaction_history` (CQRS — 1 cho A loại `SENT`, 1 cho B loại `RECEIVED`). `notification-service` gửi thông báo biến động số dư cho cả A và B |
+| 3 — Phát lệnh Credit | `payment-service` consume `DebitCompleted` → trong **1 transaction atomic**: cập nhật `saga_state='CREDIT_PENDING'` + ghi `outbox_events` (`CreditCommand`) → publish → `wallet-service` check idempotency, tìm hoặc tự tạo ví B đúng currency, cộng tiền → publish `CreditCompleted` |
+| 4 — Hoàn tất | `payment-service` consume `CreditCompleted` → `status='COMPLETED'`, `saga_state='COMPLETED'`. Ghi 2 rows vào `transaction_history` (CQRS — 1 cho A loại `SENT`, 1 cho B loại `RECEIVED`). `notification-service` gửi thông báo biến động số dư cho cả A và B |
 
-**Saga State Machine — vì sao cần `DEBIT_COMPLETED` làm state trung gian:**
-Nếu `payment-service` crash đúng lúc giữa "nhận được `DebitCompleted`" và "ghi xong `outbox_events` cho `CreditCommand`", thì:
-- Không có `DEBIT_COMPLETED`: khi service phục hồi, không biết chính xác đã nhận `DebitCompleted` chưa → có nguy cơ xử lý sai (bỏ sót hoặc lặp)
-- Có `DEBIT_COMPLETED`: service phục hồi, query `transactions WHERE saga_state='DEBIT_COMPLETED'` → biết chính xác cần resume từ bước "phát lệnh Credit", không cần đoán
+**Saga State Machine — vì sao KHÔNG cần state trung gian `DEBIT_COMPLETED`:**
+Khi `payment-service` consume `DebitCompleted`, nó cập nhật `saga_state='CREDIT_PENDING'` và ghi `outbox_events (CreditCommand)` trong **cùng 1 transaction atomic**. Nhờ Outbox Pattern, bài toán "crash giữa lúc nhận `DebitCompleted` và lúc phát `CreditCommand`" đã được giải quyết triệt để:
+- Nếu transaction **commit** → cả state lẫn CreditCommand cùng có → chuyển thẳng sang `CREDIT_PENDING`
+- Nếu transaction **rollback/crash** → không có gì thay đổi, giữ nguyên `DEBIT_PENDING` → sự kiện `DebitCompleted` sẽ được xử lý lại nhờ consumer idempotent
 
-Đây là lý do dùng đủ 3 state `DEBIT_PENDING → DEBIT_COMPLETED → CREDIT_PENDING` thay vì gộp tắt `DEBIT_PENDING → CREDIT_PENDING`.
+Thêm một state trung gian `DEBIT_COMPLETED` trong cùng transaction là **dư thừa** — nó không bao giờ được commit tách biệt để làm resume point. Vì vậy state machine chỉ cần `DEBIT_PENDING → CREDIT_PENDING`, không cần chặng giữa.
 
 **Optimization (không bắt buộc):** ở Bước 1, `payment-service` có thể check nhanh trạng thái ví B (REST call đồng bộ hoặc cached status) trước khi khởi động Saga — nếu B đã `CLOSED` từ trước thì từ chối ngay, tiết kiệm 1 vòng Saga không cần thiết. Tuy nhiên đây **chỉ là tối ưu giảm xác suất**, không thay thế được Compensating Transaction ở mục 5 bên dưới — vì B hoàn toàn có thể bị khóa **giữa lúc** Saga đang chạy (race condition giữa bước 1 và bước 4).
 
@@ -165,6 +164,7 @@ Vì chưa trừ được tiền A, **không cần Compensating Transaction** —
 - `DebitReverseCommand` phải được thiết kế **idempotent và retriable** — `wallet-service` có thể nhận lại lệnh này nhiều lần mà không gây lỗi (dùng cùng idempotency key `debit-reverse:{transactionId}:{userId}`)
 - `payment-service` retry `DebitReverseCommand` với backoff (ví dụ 3 lần, giãn cách 5s/15s/60s)
 - Sau N lần retry vẫn thất bại → **không được tự ý đánh dấu giao dịch là xong**. Chuyển `saga_state='COMPENSATION_FAILED'`, đẩy event vào Dead Letter Queue (Kafka topic riêng `wallet.dlq`), và bắn alert cho vận hành (human intervention)
+- **Ghi nhận lỗi đúng cách khi vào DLQ:** lưu **metadata có cấu trúc** (`errorClass`, `errorMessage` ngắn, `failedStep`, `retryCount`, `transactionId`) vào **Kafka header** — KHÔNG đổ full stacktrace vào payload nghiệp vụ (dài, nhiễu, phình message). Full stacktrace để ở application log, correlate bằng `transactionId` (MDC/trace-id). Đồng thời **INSERT vào bảng `dead_letter_events` (payment_db)** làm sổ tra cứu để Ops query SQL và replay dễ dàng
 - **`status` giữ nguyên `PROCESSING`** khi `saga_state='COMPENSATION_FAILED'` (KHÔNG set `FAILED`/`REVERSED`). Lý do: giao dịch thực sự **chưa** kết thúc — tiền đã trừ A nhưng chưa hoàn được. Để `status='PROCESSING'` giúp nó vẫn hiện là "đang treo, cần can thiệp" trên dashboard vận hành, đúng bản chất sổ sách
 - Giao dịch ở trạng thái này phải hiển thị rõ ràng trên dashboard vận hành — đây là lý do tiền trong hệ thống Fintech không bao giờ tự "biến mất" khỏi sổ sách, kể cả khi automation thất bại hoàn toàn
 
@@ -207,12 +207,14 @@ CREATE INDEX idx_payment_idempotency_expires ON payment_idempotency_keys (expire
 -- để đối soát (reconciliation) sau này, và làm idempotency key
 -- "topup:{external_reference_id}" ở wallet-service
 ALTER TABLE transactions ADD COLUMN external_reference_id VARCHAR(255);
-CREATE INDEX idx_transactions_external_ref ON transactions (external_reference_id);
+-- Partial index: chỉ TOP_UP có giá trị, TRANSFER đều NULL
+CREATE INDEX idx_transactions_external_ref ON transactions (external_reference_id)
+    WHERE external_reference_id IS NOT NULL;
 ```
 
-### 3. Quyết định giữ nguyên `saga_state = 'DEBIT_COMPLETED'`
+### 3. Bỏ `saga_state = 'DEBIT_COMPLETED'` khỏi state machine
 
-State này **được sử dụng thật** (không phải state mồ côi) — làm điểm resume chính xác khi `payment-service` crash giữa lúc nhận `DebitCompleted` và lúc phát `CreditCommand`. Xem giải thích chi tiết ở UC3 mục 3.
+State này **không cần thiết** và đã được loại khỏi CHECK constraint. Lý do: việc cập nhật `saga_state` và ghi `outbox_events (CreditCommand)` nằm chung 1 transaction atomic, nên không tồn tại thời điểm nào DB dừng ở `DEBIT_COMPLETED` để làm resume point. State machine gọn lại còn `DEBIT_PENDING → CREDIT_PENDING`. Xem giải thích chi tiết ở UC3 mục 3.
 
 ### 4. Business rule bổ sung cho `wallet-service`
 
@@ -225,6 +227,34 @@ State này **được sử dụng thật** (không phải state mồ côi) — l
 - Validate `currency` bắt buộc có trong request transfer
 - Thêm `saga_state = 'COMPENSATION_FAILED'` vào CHECK constraint — dùng khi `DebitReverseCommand` retry hết số lần vẫn thất bại, cần human intervention
 
+### 6. Thêm bảng `dead_letter_events` (`payment_db`)
+
+Sổ tra cứu DLQ song song với Kafka topic `wallet.dlq`, để Ops query SQL / build dashboard / replay dễ hơn đọc message trong Kafka.
+
+```sql
+CREATE TABLE dead_letter_events (
+    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id  UUID         NOT NULL,
+    topic           VARCHAR(100) NOT NULL DEFAULT 'wallet.dlq',
+    event_type      VARCHAR(100) NOT NULL,
+    payload         JSONB        NOT NULL,
+    failed_step     VARCHAR(50)  NOT NULL,   -- vd 'DEBIT_REVERSE'
+    error_class     VARCHAR(255),            -- vd 'WalletFrozenException'
+    error_message   TEXT,                    -- mô tả ngắn, KHÔNG phải full stacktrace
+    retry_count     INT          NOT NULL DEFAULT 0,
+    status          VARCHAR(20)  NOT NULL DEFAULT 'NEW',  -- NEW, INVESTIGATING, RESOLVED
+    created_at      TIMESTAMP    NOT NULL DEFAULT NOW(),
+    resolved_at     TIMESTAMP,
+
+    CONSTRAINT dlq_status_chk CHECK (status IN ('NEW', 'INVESTIGATING', 'RESOLVED'))
+);
+
+CREATE INDEX idx_dlq_transaction_id ON dead_letter_events (transaction_id);
+CREATE INDEX idx_dlq_unresolved     ON dead_letter_events (id) WHERE status != 'RESOLVED';
+```
+
+> Nguyên tắc: metadata lỗi có cấu trúc ở đây + Kafka header; full stacktrace để ở application log, correlate bằng `transaction_id`.
+
 ---
 
 ## Checklist trước khi giao Kiro
@@ -236,8 +266,9 @@ State này **được sử dụng thật** (không phải state mồ côi) — l
 - [ ] UC3: Idempotency Redis SETNX ở tầng Kafka consumer (`debit:`/`credit:` — đã có)
 - [ ] UC3: Chặn `sender_id == receiver_id` ngay tại API, trả HTTP 400
 - [ ] UC3: Currency bắt buộc trong request; `wallet-service` tự tạo ví B nếu chưa có currency đó
-- [ ] UC3: Dùng đủ 3 saga_state `DEBIT_PENDING → DEBIT_COMPLETED → CREDIT_PENDING` để resume đúng vị trí khi crash
+- [ ] UC3: State machine gọn `DEBIT_PENDING → CREDIT_PENDING` (bỏ `DEBIT_COMPLETED`); cập nhật state + ghi outbox CreditCommand trong 1 transaction atomic
 - [ ] UC3: Compensating Transaction đầy đủ 6 bước khi `CreditFailed`
-- [ ] UC3: `DebitReverseCommand` idempotent + retriable; retry hết vẫn fail → `COMPENSATION_FAILED` + Dead Letter Queue (`wallet.dlq`) + alert; `status` giữ nguyên `PROCESSING`
+- [ ] UC3: `DebitReverseCommand` idempotent + retriable; retry hết vẫn fail → `COMPENSATION_FAILED` + `wallet.dlq` + INSERT `dead_letter_events` (metadata có cấu trúc, không full stacktrace) + alert; `status` giữ nguyên `PROCESSING`
+- [ ] Outbox Publisher: dùng `SELECT ... FOR UPDATE SKIP LOCKED` (nhiều worker song song, không cần Distributed Lock); chờ broker ack trước khi mark `PUBLISHED`; `key=transactionId` để giữ ordering per-transaction
 - [ ] UC3: Auto-create ví B theo pattern insert-or-get (catch unique-violation → re-read → credit), không để thành `CreditFailed` oan
 - [ ] Tất cả sad path đều có `failure_reason` ghi rõ nguyên nhân cho user

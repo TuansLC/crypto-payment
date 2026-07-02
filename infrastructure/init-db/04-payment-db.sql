@@ -31,8 +31,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 --
 -- saga_state (State Machine):
 --   DEBIT_PENDING   → gửi DebitCommand, chờ wallet-service phản hồi
---   DEBIT_COMPLETED → DebitCompleted nhận được, gửi CreditCommand
---   CREDIT_PENDING  → chờ CreditCompleted hoặc CreditFailed
+--   CREDIT_PENDING  → DebitCompleted nhận được (đã trừ tiền A); đã phát CreditCommand, chờ kết quả
 --   COMPLETED       → CreditCompleted nhận được → Saga done
 --   COMPENSATING    → CreditFailed → gửi DebitReverseCommand
 --   REVERSED        → DebitReversed nhận được → Saga rollback done
@@ -61,13 +60,14 @@ CREATE TABLE transactions (
                               CONSTRAINT transactions_status_chk     CHECK (status IN (
                                                                                        'INITIATED', 'PROCESSING', 'COMPLETED', 'FAILED', 'REVERSED'
                                   )),
-    -- DEBIT_COMPLETED: state trung gian thật sự dùng — đánh dấu "đã nhận DebitCompleted,
-    -- chưa kịp ghi CreditCommand". Giúp payment-service resume đúng vị trí nếu crash
-    -- giữa 2 bước này, thay vì phải đoán lại từ đầu.
+    -- Bỏ state trung gian DEBIT_COMPLETED: việc cập nhật saga_state và ghi
+    -- outbox CreditCommand nằm chung 1 transaction atomic (Outbox Pattern),
+    -- nên không có thời điểm nào DB dừng ở DEBIT_COMPLETED để làm resume point.
+    -- State machine gọn còn DEBIT_PENDING → CREDIT_PENDING. (xem technical-flow.md GĐ4)
     -- COMPENSATION_FAILED: DebitReverseCommand retry hết số lần vẫn thất bại,
-    -- cần Dead Letter Queue + human intervention (xem UC3 mục 6)
+    -- giữ status='PROCESSING', đẩy DLQ + human intervention (xem UC3 mục 6)
                               CONSTRAINT transactions_saga_state_chk CHECK (saga_state IN (
-                                                                                           'DEBIT_PENDING', 'DEBIT_COMPLETED', 'CREDIT_PENDING',
+                                                                                           'DEBIT_PENDING', 'CREDIT_PENDING',
                                                                                            'COMPLETED', 'COMPENSATING', 'REVERSED', 'FAILED', 'COMPENSATION_FAILED'
                                   )),
     -- sender_id nullable vì TOP_UP không có sender (nạp từ bên ngoài)
@@ -237,3 +237,46 @@ CREATE TABLE saga_logs (
 
 CREATE INDEX idx_saga_logs_transaction_id ON saga_logs (transaction_id);
 CREATE INDEX idx_saga_logs_created_at     ON saga_logs (created_at DESC);
+
+-- ------------------------------------------------------------
+-- dead_letter_events
+-- Sổ tra cứu DLQ — song song với Kafka topic `wallet.dlq`.
+--
+-- Khi Compensating Transaction (DebitReverseCommand) retry hết số lần vẫn
+-- thất bại → saga_state='COMPENSATION_FAILED' → ghi 1 row vào đây để Ops
+-- query bằng SQL (dễ hơn đọc message trong Kafka topic), build dashboard,
+-- và replay khi đã xử lý xong sự cố.
+--
+-- ⚠️ Chỉ lưu metadata CÓ CẤU TRÚC, KHÔNG đổ full stacktrace vào đây:
+--   - error_class:   loại exception (vd 'WalletFrozenException')
+--   - error_message: mô tả ngắn gọn
+--   - failed_step:   bước Saga bị lỗi (vd 'DEBIT_REVERSE')
+--   - retry_count:   số lần đã retry trước khi bỏ cuộc
+--   Full stacktrace để ở application log, correlate bằng transaction_id (MDC/trace-id).
+--
+-- status:
+--   NEW        → vừa vào DLQ, chờ Ops xử lý
+--   INVESTIGATING → đang điều tra
+--   RESOLVED   → đã xử lý (replay thành công hoặc chỉnh tay)
+-- ------------------------------------------------------------
+CREATE TABLE dead_letter_events (
+    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id  UUID         NOT NULL,
+    topic           VARCHAR(100) NOT NULL DEFAULT 'wallet.dlq',
+    event_type      VARCHAR(100) NOT NULL,
+    payload         JSONB        NOT NULL,
+    failed_step     VARCHAR(50)  NOT NULL,
+    error_class     VARCHAR(255),
+    error_message   TEXT,
+    retry_count     INT          NOT NULL DEFAULT 0,
+    status          VARCHAR(20)  NOT NULL DEFAULT 'NEW',
+    created_at      TIMESTAMP    NOT NULL DEFAULT NOW(),
+    resolved_at     TIMESTAMP,
+
+    CONSTRAINT dlq_status_chk CHECK (status IN ('NEW', 'INVESTIGATING', 'RESOLVED'))
+);
+
+CREATE INDEX idx_dlq_transaction_id ON dead_letter_events (transaction_id);
+CREATE INDEX idx_dlq_created_at     ON dead_letter_events (created_at DESC);
+-- Partial index: Ops chỉ quan tâm các row chưa xử lý xong
+CREATE INDEX idx_dlq_unresolved     ON dead_letter_events (id) WHERE status != 'RESOLVED';
