@@ -8,8 +8,6 @@
 #
 # ⚠️ Scripts trong init-db/ CHỈ chạy 1 lần khi volume postgres còn trống.
 #    Sửa file .sql sau đó phải "down -v" rồi "up" mới có tác dụng.
-#
-# ⚠️ Cần tạo file .env cùng cấp (xem .env.example) trước khi chạy.
 # ============================================================
 
 services:
@@ -19,8 +17,8 @@ services:
     command: ["postgres", "-c", "wal_level=logical"]
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
     ports:
       - "5432:5432"
@@ -29,7 +27,7 @@ services:
       # Mount cả thư mục — Postgres chạy các file .sql theo thứ tự alphabet
       - ./init-db:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -59,11 +57,13 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
       ZOOKEEPER_4LW_COMMANDS_WHITELIST: "ruok,stat"
     healthcheck:
-      # "ruok" (are you ok) là lệnh 4-letter-word chuẩn của Zookeeper để check health
-      test: ["CMD-SHELL", "echo ruok | nc -w 2 localhost 2181 | grep imok"]
+      # Check cổng 2181 mở bằng bash /dev/tcp — KHÔNG phụ thuộc netcat (nc)
+      # vì image cp-zookeeper không có sẵn nc → healthcheck cũ luôn fail.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/2181' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 15s
     networks:
       - crypto-network
 

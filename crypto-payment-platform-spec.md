@@ -16,8 +16,8 @@ Xây dựng một hệ thống thanh toán crypto thu nhỏ (giống Binance Pay
 
 | Thành phần | Công nghệ |
 |---|---|
-| Language | Java 17 |
-| Framework | Spring Boot 3.5.x |
+| Language | Java 21 (LTS) |
+| Framework | Spring Boot 4.1.x |
 | Build tool | Maven |
 | Database | PostgreSQL 15 (4 database riêng biệt) |
 | Message broker | Apache Kafka + Zookeeper |
