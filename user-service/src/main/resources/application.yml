@@ -1,0 +1,33 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: user-service
+  # Java 21 Virtual Threads — mỗi request/consumer chạy trên virtual thread rẻ tiền
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/user_db
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      # Schema do init-db quản lý; 'update' an toàn cho dev, không drop dữ liệu
+      ddl-auto: update
+    show-sql: true
+    open-in-view: false
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+# JWT config (dùng khi implement Spring Security)
+app:
+  jwt:
+    secret: change-me-to-a-long-random-secret-key-at-least-256-bits-please
+    expiration-ms: 86400000   # 24h

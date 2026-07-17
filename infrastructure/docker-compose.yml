@@ -114,6 +114,128 @@ services:
     networks:
       - crypto-network
 
+  # ============================================================
+  # APPLICATION SERVICES (profile "apps")
+  # Mặc định KHÔNG chạy (để dev chạy service từ IDE).
+  # Chạy full stack:  docker compose --profile apps up -d --build
+  #
+  # ⚠️ Trong container, service dùng hostname NỘI BỘ (postgres/kafka/redis),
+  #    KHÔNG phải localhost. Các biến SPRING_* override lên application.yml
+  #    nhờ Spring relaxed binding (SPRING_DATASOURCE_URL → spring.datasource.url).
+  # ============================================================
+  user-service:
+    build:
+      context: ../user-service
+    container_name: crypto-user-service
+    profiles: ["apps"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      TZ: UTC
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/user_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - crypto-network
+
+  wallet-service:
+    build:
+      context: ../wallet-service
+    container_name: crypto-wallet-service
+    profiles: ["apps"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    environment:
+      TZ: UTC
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+    networks:
+      - crypto-network
+
+  payment-service:
+    build:
+      context: ../payment-service
+    container_name: crypto-payment-service
+    profiles: ["apps"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      TZ: UTC
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+    networks:
+      - crypto-network
+
+  notification-service:
+    build:
+      context: ../notification-service
+    container_name: crypto-notification-service
+    profiles: ["apps"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+    environment:
+      TZ: UTC
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/notification_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - crypto-network
+
+  audit-service:
+    build:
+      context: ../audit-service
+    container_name: crypto-audit-service
+    profiles: ["apps"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+    environment:
+      TZ: UTC
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/audit_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - crypto-network
+
 volumes:
   postgres-data:
 
