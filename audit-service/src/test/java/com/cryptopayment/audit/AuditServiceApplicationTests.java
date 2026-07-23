@@ -1,10 +1,10 @@
-package com.cryptopayment;
+package com.cryptopayment.audit;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class UserServiceApplicationTests {
+class AuditServiceApplicationTests {
 
     @Test
     void contextLoads() {

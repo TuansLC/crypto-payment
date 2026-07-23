@@ -1,10 +1,10 @@
-package com.cryptopayment;
+package com.cryptopayment.wallet;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class NotificationServiceApplicationTests {
+class WalletServiceApplicationTests {
 
     @Test
     void contextLoads() {
