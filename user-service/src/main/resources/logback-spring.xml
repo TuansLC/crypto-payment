@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logback của user-service: chỉ include config chung từ common-core.
+  Muốn tinh chỉnh riêng thì thêm logger/appender bên dưới include.
+  Log level đặt ở application.yml (logging.level.*).
+-->
+<configuration>
+    <include resource="logback-common.xml"/>
+</configuration>

@@ -7,6 +7,10 @@ spring:
   threads:
     virtual:
       enabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: false   # bỏ qua field lạ → event/DTO evolution an toàn
+    default-property-inclusion: non_null   # ẩn field null trong response
   datasource:
     url: jdbc:postgresql://localhost:5432/payment_db
     username: postgres
@@ -29,14 +33,24 @@ spring:
       auto-offset-reset: earliest
       enable-auto-commit: false
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # ErrorHandlingDeserializer bọc JsonDeserializer → lỗi deserialize (poison pill)
+      # được DefaultErrorHandler đẩy sang .DLT thay vì crash-loop vô hạn
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: "*"
     producer:
+      acks: all                 # chờ mọi replica ISR ack → durability
+      retries: 3
+      properties:
+        enable.idempotence: true   # broker chống duplicate ở tầng network (fintech)
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
     listener:
-      ack-mode: manual
+      # ack-mode RECORD: container commit offset SAU KHI listener method (@Transactional)
+      # trả về thành công. Exception → không commit → DefaultErrorHandler retry/DLT.
+      # ⚠️ KHÔNG thêm @Async vào listener — sẽ phá vỡ nguyên tắc commit-after-success.
+      ack-mode: record
 
 # Outbox publisher poll interval
 app:

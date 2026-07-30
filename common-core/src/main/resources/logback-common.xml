@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Config log DÙNG CHUNG cho mọi service.
+  Service chỉ cần: <include resource="logback-common.xml"/> trong logback-spring.xml của nó.
+
+  - Profile mặc định / dev  → CONSOLE dạng text (dễ đọc), kèm [traceId,spanId].
+  - Profile prod            → JSON 1 dòng/log (ELK/Loki index được theo traceId, level, service).
+  - traceId/spanId do Micrometer Tracing đặt vào MDC (thêm micrometer-tracing vào service).
+  - Log LEVEL đặt ở application.yml từng service (logging.level.*), KHÔNG hard-code ở đây.
+-->
+<included>
+
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="app"/>
+
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [${appName}] [%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n"/>
+
+    <!-- Console text — dev/default -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Console JSON — prod (LogstashEncoder tự include mọi MDC, gồm traceId/spanId) -->
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"${appName}"}</customFields>
+        </encoder>
+    </appender>
+
+    <springProfile name="prod">
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+</included>

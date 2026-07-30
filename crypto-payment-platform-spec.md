@@ -19,7 +19,7 @@ Xây dựng một hệ thống thanh toán crypto thu nhỏ (giống Binance Pay
 | Language | Java 21 (LTS) |
 | Framework | Spring Boot 4.1.x |
 | Build tool | Maven |
-| Database | PostgreSQL 15 (4 database riêng biệt) |
+| Database | PostgreSQL 15 (5 database riêng biệt) |
 | Message broker | Apache Kafka + Zookeeper |
 | Cache | Redis 7 |
 | Containerization | Docker Compose |
@@ -30,6 +30,10 @@ Xây dựng một hệ thống thanh toán crypto thu nhỏ (giống Binance Pay
 
 ```
 crypto-payment/                        ← Git monorepo (1 repo duy nhất)
+├── common-core/                       ← Shared lib (jar): envelope, ApiResponse, exception, BaseEntity, logging
+├── common-messaging/                  ← Shared lib (jar): EventPublisher, Outbox, DLT error handler
+├── common-redis/                      ← Shared lib (jar): Idempotency, DistributedLock
+├── common-security/                   ← Shared lib (jar): JWT create/verify, auth filter
 ├── user-service/                      ← Spring Boot, port 8081
 │   ├── src/
 │   └── pom.xml
@@ -60,9 +64,33 @@ crypto-payment/                        ← Git monorepo (1 repo duy nhất)
 
 ### Nguyên tắc kiến trúc
 - **Database per Service**: mỗi service có database riêng, không query chéo
-- **5 project độc lập**: không dùng Maven multi-module, mỗi service deploy riêng biệt
+- **5 service độc lập**: không dùng Maven multi-module, mỗi service deploy riêng biệt
+- **Shared libraries**: cross-cutting concern (event envelope, outbox, idempotency, JWT...) đóng gói thành 4 lib jar dùng chung — chia sẻ *code*, KHÔNG chia sẻ *service* (không phá database-per-service)
 - **Giao tiếp bất đồng bộ**: ưu tiên Kafka events thay vì REST call trực tiếp giữa các service
 - **Centralized event trace**: `audit-service` consume mọi topic → ghi `event_store` (DB riêng), trace toàn bộ hành trình giao dịch mà KHÔNG phá database-per-service
+
+---
+
+## 2.1 Shared Libraries (common-*)
+
+4 thư viện jar dùng chung, mỗi cái packaging `jar` (KHÔNG dùng `spring-boot-maven-plugin` repackage) + auto-configuration để service "add dependency là dùng được".
+
+| Lib | Nội dung chính | Service dùng |
+|---|---|---|
+| **common-core** | `EventEnvelope` (correlationId/causationId), `ApiResponse`/`ErrorDetail`/`PageResponse`, `ErrorCode`/`BusinessException`/`GlobalExceptionHandler`, `BaseEntity`, `logback-common.xml` | tất cả |
+| **common-messaging** | `EventPublisher`, Outbox (`AbstractOutboxEvent` + `OutboxStore` + `OutboxPublisherJob` SKIP LOCKED), consumer error handler → `{topic}.DLT` | tất cả |
+| **common-redis** | `IdempotencyService` (status + cached result) + `IdempotencyKeys` factory, `DistributedLock` (SETNX + Lua) | wallet, payment |
+| **common-security** | `JwtService` (HS256 create/verify), `JwtAuthenticationFilter`, `JwtAuthenticationEntryPoint` (401 chuẩn) | user, wallet, payment |
+
+**Nguyên tắc đóng gói:** chỉ chứa hạ tầng/kỹ thuật dùng chung + contract ổn định (event type, error code), TUYỆT ĐỐI KHÔNG chứa business logic (tránh biến lib thành "distributed monolith").
+
+**Thứ tự build/install (local `~/.m2`):** `common-core` → `common-messaging` / `common-security` (phụ thuộc core) → `common-redis`.
+
+**Các quyết định kỹ thuật đáng chú ý (Spring Boot 4 / Jackson 3):**
+- Producer: `acks=all` + `enable.idempotence=true` (chống duplicate tầng broker).
+- Consumer: `ErrorHandlingDeserializer` bọc `JsonDeserializer` để bắt poison pill; `DefaultErrorHandler` + `ExponentialBackOff` (3 lần) → `{topic}.DLT`; `ack-mode=RECORD` (commit sau khi `@Transactional` thành công, cấm `@Async`).
+- Outbox publish RAW BYTES (tránh double-encode); trace log để **Micrometer Tracing** lo (không tự viết filter).
+- JWT dùng jjwt backend **Gson** (né xung đột Jackson 2/3).
 
 ---
 
@@ -921,13 +949,15 @@ GET    /api/payments/{id}        ← Chi tiết giao dịch
 ## 11. Thứ tự implement gợi ý
 
 1. **Infrastructure**: Docker Compose, verify Kafka + PostgreSQL + Redis chạy được
-2. **user-service**: Register, Login, JWT, publish UserRegistered
-3. **wallet-service**: Consume UserRegistered tạo ví, Optimistic Locking, Idempotency
-4. **payment-service**: Top-up flow trước (đơn giản hơn)
-5. **payment-service**: P2P Transfer — Saga Orchestration (Happy Path)
-6. **payment-service**: Sad Path + Compensating Transaction
-7. **payment-service**: Outbox Pattern thay thế kafkaTemplate.send() trực tiếp
-8. **payment-service**: CQRS — transaction history read model
-9. **wallet-service**: Redis cache cho balance query
-10. **notification-service**: Consume events và log
-11. **README.md**: Architecture diagram, hướng dẫn chạy local
+2. **Shared libraries**: build/install `common-core` → `common-messaging`/`common-security` → `common-redis` vào `~/.m2`
+3. **user-service**: Register, Login, JWT, publish UserRegistered
+4. **wallet-service**: Consume UserRegistered tạo ví, Optimistic Locking, Idempotency
+5. **payment-service**: Top-up flow trước (đơn giản hơn)
+6. **payment-service**: P2P Transfer — Saga Orchestration (Happy Path)
+7. **payment-service**: Sad Path + Compensating Transaction
+8. **payment-service**: Outbox Pattern thay thế kafkaTemplate.send() trực tiếp
+9. **payment-service**: CQRS — transaction history read model
+10. **wallet-service**: Redis cache cho balance query
+11. **notification-service**: Consume events và log
+12. **audit-service**: Consume tất cả topic → ghi event_store; API trace theo correlationId
+13. **README.md**: Architecture diagram, hướng dẫn chạy local

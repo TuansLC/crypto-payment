@@ -8,6 +8,10 @@ spring:
   threads:
     virtual:
       enabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: false   # bỏ qua field lạ → event/DTO evolution an toàn
+    default-property-inclusion: non_null   # ẩn field null trong response
   datasource:
     url: jdbc:postgresql://localhost:5432/user_db
     username: postgres
@@ -23,11 +27,17 @@ spring:
   kafka:
     bootstrap-servers: localhost:9092
     producer:
+      acks: all                 # chờ mọi replica ISR ack → durability
+      retries: 3
+      properties:
+        enable.idempotence: true   # broker chống duplicate ở tầng network (fintech)
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
 # JWT config (dùng khi implement Spring Security)
 app:
   jwt:
+    # ⚠️ secret PHẢI >= 32 ký tự (256 bit) cho HS256, nếu không jjwt ném WeakKeyException.
+    # Production: đưa vào env var / secret manager, KHÔNG hardcode.
     secret: change-me-to-a-long-random-secret-key-at-least-256-bits-please
     expiration-ms: 86400000   # 24h

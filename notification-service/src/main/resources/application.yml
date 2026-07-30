@@ -7,6 +7,10 @@ spring:
   threads:
     virtual:
       enabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: false   # bỏ qua field lạ → event/DTO evolution an toàn
+    default-property-inclusion: non_null   # ẩn field null trong response
   datasource:
     url: jdbc:postgresql://localhost:5432/notification_db
     username: postgres
@@ -24,6 +28,12 @@ spring:
       group-id: notification-service-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # ErrorHandlingDeserializer bọc JsonDeserializer → lỗi deserialize (poison pill)
+      # được DefaultErrorHandler đẩy sang .DLT thay vì crash-loop vô hạn
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: "*"
+    listener:
+      # ack-mode RECORD: commit offset sau khi listener trả về thành công (đồng bộ, không @Async)
+      ack-mode: record
