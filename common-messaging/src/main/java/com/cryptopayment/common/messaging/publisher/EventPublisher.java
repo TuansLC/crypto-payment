@@ -9,6 +9,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 
 import com.cryptopayment.common.core.event.EventEnvelope;
+import com.cryptopayment.common.messaging.EventHeaders;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -41,9 +42,9 @@ public class EventPublisher {
                                                                  EventEnvelope<?> envelope) {
         ProducerRecord<String, Object> record = new ProducerRecord<>(topic, key, envelope);
         Headers headers = record.headers();
-        addHeader(headers, "eventId", envelope.getEventId());
-        addHeader(headers, "correlationId", envelope.getCorrelationId());
-        addHeader(headers, "eventType", envelope.getEventType());
+        addHeader(headers, EventHeaders.EVENT_ID, envelope.getEventId());
+        addHeader(headers, EventHeaders.CORRELATION_ID, envelope.getCorrelationId());
+        addHeader(headers, EventHeaders.EVENT_TYPE, envelope.getEventType());
 
         log.debug("Publishing event [{}] type={} correlationId={} → topic={}",
                 envelope.getEventId(), envelope.getEventType(), envelope.getCorrelationId(), topic);

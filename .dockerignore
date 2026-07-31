@@ -1,0 +1,40 @@
+# Build context của các service là REPO ROOT (xem infrastructure/docker-compose.yml),
+# nên .dockerignore phải đặt ở đây. Mục đích: không gửi file thừa sang Docker daemon
+# (nhanh hơn, và tránh target/ của host lẫn vào build trong container).
+
+# Maven build output — build lại trong container
+**/target/
+**/.mvn/
+**/mvnw
+**/mvnw.cmd
+
+# IDE
+**/.idea/
+**/*.iml
+**/*.iws
+**/*.ipr
+
+# VCS
+.git/
+.gitignore
+.gitattributes
+**/.gitignore
+**/.gitattributes
+
+# Docker
+**/Dockerfile
+**/.dockerignore
+infrastructure/
+
+# Tài liệu & script tiện ích không cần cho build
+*.md
+**/HELP.md
+*.ps1
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config local
+**/application-local.yml

@@ -9,6 +9,8 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cryptopayment.common.messaging.EventHeaders;
+
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -75,8 +77,10 @@ public class OutboxPublisherJob<E extends AbstractOutboxEvent> {
                     event.getTopic(),
                     event.getAggregateId().toString(),
                     event.getPayload().getBytes(StandardCharsets.UTF_8));
-            record.headers().add("eventId", event.getEventId().toString().getBytes(StandardCharsets.UTF_8));
-            record.headers().add("eventType", event.getEventType().getBytes(StandardCharsets.UTF_8));
+            record.headers().add(EventHeaders.EVENT_ID,
+                    event.getEventId().toString().getBytes(StandardCharsets.UTF_8));
+            record.headers().add(EventHeaders.EVENT_TYPE,
+                    event.getEventType().getBytes(StandardCharsets.UTF_8));
 
             // CHỜ broker ack rồi mới mark PUBLISHED — tránh mất event nếu Kafka lỗi
             bytesKafkaTemplate.send(record).get(ACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);

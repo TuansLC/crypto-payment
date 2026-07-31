@@ -125,7 +125,11 @@ services:
   # ============================================================
   user-service:
     build:
-      context: ../user-service
+      # Context = REPO ROOT (không phải ../user-service) vì Dockerfile cần copy
+      # thêm common-core/messaging/security để `mvn install` các shared lib
+      # SNAPSHOT — chúng không có trên Maven Central.
+      context: ..
+      dockerfile: user-service/Dockerfile
     container_name: crypto-user-service
     profiles: ["apps"]
     depends_on:
@@ -134,7 +138,12 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8081:8081"
+      # ⚠️ Host dùng 18081 (không phải 8081) vì trên máy dev port 8081 đã bị
+      # McAfee Agent (macmnsvc.exe) chiếm ở 0.0.0.0:8081 — nó accept TCP rồi
+      # đóng ngay, gây lỗi "Empty reply from server". Trong container vẫn là
+      # 8081, nên giao tiếp service-to-service qua http://user-service:8081
+      # không đổi.
+      - "18081:8081"
     environment:
       TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/user_db

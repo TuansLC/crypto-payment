@@ -34,8 +34,14 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
-# JWT config (dùng khi implement Spring Security)
 app:
+  # Outbox Publisher — tuning được theo môi trường, không cần sửa code
+  outbox:
+    poll-delay-ms: 1000   # OutboxPublisherJob đọc trực tiếp qua @Scheduled(fixedDelayString)
+    batch-size: 100       # số event mỗi chu kỳ; lớn quá → transaction dài, giữ row lock lâu
+    max-retries: 3        # vượt ngưỡng → status=FAILED, cần điều tra thủ công
+
+  # JWT config
   jwt:
     # ⚠️ secret PHẢI >= 32 ký tự (256 bit) cho HS256, nếu không jjwt ném WeakKeyException.
     # Production: đưa vào env var / secret manager, KHÔNG hardcode.

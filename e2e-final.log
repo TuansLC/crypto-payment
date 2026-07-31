@@ -1,0 +1,48 @@
+
+
+########## 1. REGISTER -> mong doi 201 + JWT ##########
+{"success":true,"code":"OK","data":{"accessToken":"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJiNzU5NWNiZi1kNmJmLTRkNDMtODk5Ni0wZDg2MjEyMDU4YWYiLCJ1c2VybmFtZSI6ImFsaWNlMjQ3NzgiLCJpYXQiOjE3ODU0ODgyMzAsImV4cCI6MTc4NTU3NDYzMH0.iOJ7OkxRvgvZwwUqN6hKgIFMWXBcnWLaERdNfwYJDJLcpF6T5NGsj7fn569UB9lA","tokenType":"Bearer","user":{"id":"b7595cbf-d6bf-4d43-8996-0d86212058af","username":"alice24778","email":"alice24778@example.com","fullName":"Alice Nguyen","status":"ACTIVE"}},"timestamp":"2026-07-31T08:57:10.926472017Z"}
+HTTP=201
+TOKEN_FOUND=True
+
+########## 2. REGISTER trung username -> mong doi 409 CONFLICT ##########
+{"success":false,"code":"CONFLICT","message":"Username -æ+ú tß+ôn tß¦íi","path":"/api/users/register","timestamp":"2026-07-31T08:57:11.778570273Z"}
+HTTP=409
+
+########## 3. VALIDATION (username ngan, email sai, password ngan) -> mong doi 400 VALIDATION_ERROR ##########
+{"success":false,"code":"VALIDATION_ERROR","message":"Dß+» liß+çu kh+¦ng hß+úp lß+ç","path":"/api/users/register","errors":[{"field":"username","message":"username phß¦úi tß+½ 3 -æß¦+n 50 k++ tß+¦"},{"field":"email","message":"email kh+¦ng hß+úp lß+ç"},{"field":"password","message":"password phß¦úi tß+½ 6 -æß¦+n 100 k++ tß+¦"}],"timestamp":"2026-07-31T08:57:12.572260823Z"}
+HTTP=400
+
+########## 4. LOGIN dung mat khau -> mong doi 200 + JWT ##########
+{"success":true,"code":"OK","data":{"accessToken":"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJiNzU5NWNiZi1kNmJmLTRkNDMtODk5Ni0wZDg2MjEyMDU4YWYiLCJ1c2VybmFtZSI6ImFsaWNlMjQ3NzgiLCJpYXQiOjE3ODU0ODgyMzMsImV4cCI6MTc4NTU3NDYzM30.HfV_Wg9PCVb1sKqF5kT6YRQ6OAdpD3iTYCjEKSTvmMJRZNjf7VnfiX46mTuZ0PS-","tokenType":"Bearer","user":{"id":"b7595cbf-d6bf-4d43-8996-0d86212058af","username":"alice24778","email":"alice24778@example.com","fullName":"Alice Nguyen","status":"ACTIVE"}},"timestamp":"2026-07-31T08:57:13.662606803Z"}
+HTTP=200
+
+########## 5. LOGIN sai mat khau -> mong doi 401 UNAUTHORIZED ##########
+{"success":false,"code":"UNAUTHORIZED","message":"Sai t+ái khoß¦ún hoß¦+c mß¦¡t khß¦¬u","path":"/api/users/login","timestamp":"2026-07-31T08:57:14.660363532Z"}
+HTTP=401
+
+########## 6. LOGIN user khong ton tai -> mong doi 401 (khong lo user co ton tai) ##########
+{"success":false,"code":"UNAUTHORIZED","message":"Sai t+ái khoß¦ún hoß¦+c mß¦¡t khß¦¬u","path":"/api/users/login","timestamp":"2026-07-31T08:57:15.270469674Z"}
+HTTP=401
+
+########## 7. GET /me khong token -> mong doi 401 ##########
+{"success":false,"code":"UNAUTHORIZED","message":"Kh+¦ng x+íc thß+¦c -æ¦¦ß+úc","path":"/api/users/me","timestamp":"2026-07-31T08:57:15.917985100Z"}
+HTTP=401
+
+########## 8. GET /me co Bearer token -> mong doi 200 + profile ##########
+{"success":true,"code":"OK","data":{"id":"b7595cbf-d6bf-4d43-8996-0d86212058af","username":"alice24778","email":"alice24778@example.com","fullName":"Alice Nguyen","status":"ACTIVE"},"timestamp":"2026-07-31T08:57:16.591967370Z"}
+HTTP=200
+
+########## 9. GET /me token rac -> mong doi 401 ##########
+{"success":false,"code":"UNAUTHORIZED","message":"Kh+¦ng x+íc thß+¦c -æ¦¦ß+úc","path":"/api/users/me","timestamp":"2026-07-31T08:57:17.211046926Z"}
+HTTP=401
+
+USERNAME_USED=alice24778
+=== E2E DONE ===
+ id |   event_type   |  status   | retry_count 
+----+----------------+-----------+-------------
+  5 | UserRegistered | PUBLISHED |           0
+  4 | UserRegistered | PUBLISHED |           0
+(2 rows)
+
+

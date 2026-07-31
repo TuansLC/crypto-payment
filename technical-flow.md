@@ -49,6 +49,15 @@ Quy tắc lan truyền:
 - `causationId` của event mới = `eventId` của event vừa xử lý sinh ra nó → dựng được chuỗi nhân quả DebitCommand → DebitCompleted → CreditCommand...
 - Nên đặt `correlationId`/`causationId`/`eventId` ở **Kafka header** (đồng thời lưu trong envelope) để consumer đọc metadata không cần parse payload.
 
+> ⚠️ **Vì sao KHÔNG dựa vào auto-propagation của Micrometer để trace xuyên service?**
+> Micrometer chỉ tự truyền trace context khi publish trong cùng thread/observation với request.
+> Nhưng luồng của ta dùng **Outbox**: request ghi outbox rồi COMMIT + trả 202; `OutboxPublisherJob`
+> (thread scheduler khác, vài giây sau, có thể instance khác) mới publish → **trace context request gốc
+> đã mất** → traceId Micrometer bị ĐỨT khi qua Outbox. Vì vậy `correlationId` trong envelope mới là
+> trace key bền vững: set = traceId lúc ghi outbox, đi theo envelope, mỗi `@KafkaListener` restore vào
+> MDC (`MDC.put(TraceConstants.MDC_CORRELATION_ID, envelope.getCorrelationId())`) → log mọi service mang
+> cùng 1 `cid`. Micrometer traceId chỉ dùng cho observability trong từng hop.
+
 **audit-service** (`@KafkaListener` group-id `audit-service-group`, subscribe **tất cả** topic) đọc envelope này và INSERT vào `event_store` (audit_db), idempotent theo `eventId` (UNIQUE → bắt duplicate-key khi Kafka giao trùng). Đây là nơi trace toàn bộ hành trình mà **không** phá database-per-service (chỉ audit-service sở hữu bảng, các service khác chỉ publish lên Kafka như thường).
 
 ---

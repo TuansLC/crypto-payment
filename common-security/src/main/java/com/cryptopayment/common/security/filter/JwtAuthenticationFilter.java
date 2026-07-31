@@ -10,6 +10,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import com.cryptopayment.common.security.jwt.AuthenticatedUser;
 import com.cryptopayment.common.security.jwt.JwtService;
 
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -42,8 +43,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // Không RBAC → authorities rỗng; authenticated=true là đủ cho .authenticated()
                 var authentication = new UsernamePasswordAuthenticationToken(user, null, List.of());
                 SecurityContextHolder.getContext().setAuthentication(authentication);
-            } catch (Exception ex) {
-                // Token sai/hết hạn → không set context; entrypoint trả 401 nếu endpoint cần auth
+            } catch (JwtException | IllegalArgumentException ex) {
+                // CHỈ bắt lỗi liên quan JWT (hết hạn/sai chữ ký/malformed/token rỗng).
+                // Lỗi khác (bug thật) sẽ propagate lên thay vì bị nuốt thành "invalid JWT".
                 log.debug("JWT không hợp lệ: {}", ex.getMessage());
                 SecurityContextHolder.clearContext();
             }

@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.cryptopayment.common.core.dto.ApiResponse;
 import com.cryptopayment.common.core.dto.ErrorDetail;
+import com.cryptopayment.common.core.observability.TraceConstants;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -73,6 +74,6 @@ public class GlobalExceptionHandler {
 
     /** traceId do Micrometer Tracing đặt vào MDC; null nếu chưa bật tracing. */
     private String currentTraceId() {
-        return MDC.get("traceId");
+        return MDC.get(TraceConstants.MDC_TRACE_ID);
     }
 }

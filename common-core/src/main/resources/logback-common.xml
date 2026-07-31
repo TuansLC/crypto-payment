@@ -12,8 +12,9 @@
 
     <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="app"/>
 
+    <!-- [traceId,spanId] = Micrometer (1 hop); cid=correlationId = trace nghiệp vụ xuyên service/async -->
     <property name="LOG_PATTERN"
-              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [${appName}] [%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n"/>
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [${appName}] [%X{traceId:-},%X{spanId:-}] cid=%X{correlationId:-} %logger{36} - %msg%n"/>
 
     <!-- Console text — dev/default -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
